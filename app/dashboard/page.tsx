@@ -196,8 +196,10 @@ export default function Dashboard() {
     e.preventDefault();
 
     if (!userId) return;
+
     const form = e.target as HTMLFormElement;
     const amountValue = parseFloat((form.amount as HTMLInputElement).value);
+
     if (isNaN(amountValue) || amountValue < 0) return alert("Please enter a valid amount.");
 
     const newExpense: Expense = {
@@ -207,32 +209,50 @@ export default function Dashboard() {
       note: (form.note as HTMLInputElement).value.trim(),
     };
 
-    if (!newExpense.date || !newExpense.category) return alert("Date and Category are required.");
+    if (!newExpense.date || !newExpense.category)
+      return alert("Date and Category are required.");
 
-    const categoryLimit = categoryLimits[newExpense.category];
+    // ===== Category limit logic =====
+    const categoryLimit = categoryLimits[newExpense.category] ?? undefined;
+
+    // Total spent in category including all expenses
     const spentInCategory = expenses
       .filter((e) => e.category === newExpense.category)
       .reduce((sum, e) => sum + e.amount, 0);
 
-    if (categoryLimit !== undefined) {
-      const predictedSpent = spentInCategory + newExpense.amount;
+    // Predicted spent in category accounting for editing
+    const predictedSpent = editingExpense
+      ? spentInCategory - editingExpense.amount + newExpense.amount
+      : spentInCategory + newExpense.amount;
 
+    if (categoryLimit !== undefined) {
       if (predictedSpent > categoryLimit) {
+        // ⚠️ 100% warning
         if (!window.confirm(
           `⚠️ Warning: you exceeded the limit for ${newExpense.category} (₹${categoryLimit}). Add this transaction?`
         )) return;
       } else if (predictedSpent >= 0.8 * categoryLimit) {
+        // ⚠️ 80% alert
         window.alert(
           `Alert: You have reached 80% of your ${newExpense.category} limit (₹${categoryLimit}).`
         );
       }
     }
 
-    const predictedTotal = totalExpenses + newExpense.amount;
-    if (predictedTotal > monthlyBudget && !window.confirm("Warning: your monthly budget exceeded. Add this transaction?")) return;
+    // ===== Monthly budget logic =====
+    const totalExcludingEditing = editingExpense
+      ? totalExpenses - editingExpense.amount
+      : totalExpenses;
+
+    const predictedTotal = totalExcludingEditing + newExpense.amount;
+
+    if (predictedTotal > monthlyBudget) {
+      if (!window.confirm("Warning: your monthly budget exceeded. Add this transaction?")) return;
+    }
 
     try {
       if (editingExpense?._id) {
+        // Edit existing expense
         const res = await fetch(`${API_BASE}/editExpense`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -246,18 +266,25 @@ export default function Dashboard() {
           }),
         });
         if (!res.ok) throw new Error("Failed to update expense");
+
         setExpenses((prev) =>
-          prev.map((e) => (e._id === editingExpense._id ? { ...newExpense, _id: editingExpense._id } : e))
+          prev.map((e) =>
+            e._id === editingExpense._id ? { ...newExpense, _id: editingExpense._id } : e
+          )
         );
         setEditingExpense(null);
       } else {
+        // Add new expense
         const res = await fetch(`${API_BASE}/addExpense`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ ...newExpense, userId }),
         });
         const addedExpense = await res.json();
-        setExpenses((prev) => [...prev, { ...newExpense, _id: addedExpense?.expenseId || Date.now().toString() }]);
+        setExpenses((prev) => [
+          ...prev,
+          { ...newExpense, _id: addedExpense?.expenseId || Date.now().toString() },
+        ]);
       }
     } catch (err) {
       console.error(err);

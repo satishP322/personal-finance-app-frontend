@@ -32,7 +32,7 @@ export default function SignupPage() {
       const data = await res.json();
 
       if (res.ok) {
-        router.push("/login");
+        router.replace("/login");
       } else {
         setError(data.error || "Could not create account");
       }
